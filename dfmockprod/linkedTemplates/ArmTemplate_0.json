@@ -30,6 +30,45 @@
 			"dependsOn": []
 		},
 		{
+			"name": "[concat(parameters('factoryName'), '/AsiaCitiesDS')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureBlobStorage_dc",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "DelimitedText",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobStorageLocation",
+						"container": "output"
+					},
+					"columnDelimiter": ",",
+					"escapeChar": "\\",
+					"quoteChar": "\""
+				},
+				"schema": [
+					{
+						"type": "String"
+					},
+					{
+						"type": "String"
+					},
+					{
+						"type": "String"
+					},
+					{
+						"type": "String"
+					}
+				]
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureBlobStorage_dc')]"
+			]
+		},
+		{
 			"name": "[concat(parameters('factoryName'), '/CityPopulationData')]",
 			"type": "Microsoft.DataFactory/factories/datasets",
 			"apiVersion": "2018-06-01",
@@ -120,6 +159,133 @@
 			]
 		},
 		{
+			"name": "[concat(parameters('factoryName'), '/DelimitedText1')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "AzureBlobStorage_dc",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "DelimitedText",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobStorageLocation",
+						"container": "output"
+					},
+					"columnDelimiter": ",",
+					"escapeChar": "\\",
+					"firstRowAsHeader": true,
+					"quoteChar": "\""
+				},
+				"schema": [
+					{
+						"name": "City",
+						"type": "String"
+					},
+					{
+						"name": "Region",
+						"type": "String"
+					},
+					{
+						"name": "Year",
+						"type": "String"
+					},
+					{
+						"name": "Population",
+						"type": "String"
+					}
+				]
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/AzureBlobStorage_dc')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/dataflow1')]",
+			"type": "Microsoft.DataFactory/factories/dataflows",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "MappingDataFlow",
+				"typeProperties": {
+					"sources": [
+						{
+							"dataset": {
+								"referenceName": "CityPopulationOutput",
+								"type": "DatasetReference"
+							},
+							"name": "CityPopulationOS"
+						}
+					],
+					"sinks": [
+						{
+							"dataset": {
+								"referenceName": "AsiaCitiesDS",
+								"type": "DatasetReference"
+							},
+							"name": "AsiaCitiesOutput"
+						},
+						{
+							"dataset": {
+								"referenceName": "DelimitedText1",
+								"type": "DatasetReference"
+							},
+							"name": "NonAsiaCitiesOutput"
+						}
+					],
+					"transformations": [
+						{
+							"name": "AsiaCitiesOnly"
+						}
+					],
+					"scriptLines": [
+						"source(output(",
+						"          City as string,",
+						"          Region as string,",
+						"          Year as integer,",
+						"          Population as integer",
+						"     ),",
+						"     allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     ignoreNoFilesFound: false) ~> CityPopulationOS",
+						"CityPopulationOS split(Region == \"Asia\",",
+						"     disjoint: false,",
+						"     partitionBy('hash', 1)) ~> AsiaCitiesOnly@(AsiaCities, NonAsiaCities)",
+						"AsiaCitiesOnly@AsiaCities sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          Column_1 as string,",
+						"          Column_2 as string,",
+						"          Column_3 as string,",
+						"          Column_4 as string",
+						"     ),",
+						"     partitionFileNames:['asia_cities.csv'],",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     partitionBy('hash', 1)) ~> AsiaCitiesOutput",
+						"AsiaCitiesOnly@NonAsiaCities sink(allowSchemaDrift: true,",
+						"     validateSchema: false,",
+						"     input(",
+						"          City as string,",
+						"          Region as string,",
+						"          Year as string,",
+						"          Population as string",
+						"     ),",
+						"     partitionFileNames:['nonasia_cities.csv'],",
+						"     skipDuplicateMapInputs: true,",
+						"     skipDuplicateMapOutputs: true,",
+						"     partitionBy('hash', 1)) ~> NonAsiaCitiesOutput"
+					]
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/CityPopulationOutput')]",
+				"[concat(variables('factoryId'), '/datasets/AsiaCitiesDS')]",
+				"[concat(variables('factoryId'), '/datasets/DelimitedText1')]"
+			]
+		},
+		{
 			"name": "[concat(parameters('factoryName'), '/pipeline1')]",
 			"type": "Microsoft.DataFactory/factories/pipelines",
 			"apiVersion": "2018-06-01",
@@ -184,6 +350,44 @@
 								"parameters": {}
 							}
 						]
+					},
+					{
+						"name": "Split cities by region",
+						"type": "ExecuteDataFlow",
+						"dependsOn": [
+							{
+								"activity": "CopyData",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "1.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"dataflow": {
+								"referenceName": "dataflow1",
+								"type": "DataFlowReference",
+								"parameters": {},
+								"datasetParameters": {
+									"CityPopulationOS": {},
+									"AsiaCitiesOutput": {},
+									"NonAsiaCitiesOutput": {}
+								}
+							},
+							"staging": {},
+							"compute": {
+								"coreCount": 8,
+								"computeType": "General"
+							},
+							"traceLevel": "Fine"
+						}
 					}
 				],
 				"policy": {
@@ -194,7 +398,8 @@
 			},
 			"dependsOn": [
 				"[concat(variables('factoryId'), '/datasets/CityPopulationData')]",
-				"[concat(variables('factoryId'), '/datasets/CityPopulationOutput')]"
+				"[concat(variables('factoryId'), '/datasets/CityPopulationOutput')]",
+				"[concat(variables('factoryId'), '/dataflows/dataflow1')]"
 			]
 		}
 	]
